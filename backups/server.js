@@ -3,14 +3,14 @@ const nanoid = require('nanoid');
 const cors = require('cors');
 const useragent = require('express-useragent');
 const geoip = require('geoip-lite');
-const requestIp = require('request-ip');
+const requestIp = require('request-ip'); // Add this package for better IP detection
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(useragent.express());
-app.use(requestIp.mw());
+app.use(requestIp.mw()); // Add middleware for IP detection
 
 const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxPV7GBDxug4pbCHteBHepy3QuVc49tLNOPgqw0i6vtOE1BNklUCB2xMJ8zcGx8kvg9/exec';
 
@@ -29,13 +29,18 @@ function formatUrl(url) {
 }
 
 function getClientInfo(req) {
+    // Get real IP address
     const ip = req.clientIp || req.ip.replace('::ffff:', '');
+    
+    // Get geo information
     const geo = geoip.lookup(ip) || {
         country: 'Unknown',
         city: 'Unknown',
         region: 'Unknown',
         timezone: 'Unknown'
     };
+
+    // Get referrer information
     const fullReferrer = req.get('Referrer') || req.get('Origin') || 'Direct';
     let referrer = 'Direct';
     try {
@@ -44,6 +49,8 @@ function getClientInfo(req) {
     } catch (e) {
         referrer = fullReferrer;
     }
+
+    // Get source information
     const source = req.get('sec-ch-ua') || 'Unknown Source';
 
     return {
@@ -98,12 +105,13 @@ function generateCopyHtml(textToCopy) {
     `;
 }
 
-app.get('/copy/:text', (req, res) => {
+app.get('/copy/:text', async (req, res) => {
     let textToCopy = decodeURIComponent(req.params.text);
     textToCopy = textToCopy.replace(/\\n/g, '\n');
     
     const clientInfo = getClientInfo(req);
     
+    // Log data to Google Sheet with improved information
     const params = new URLSearchParams({
         text: textToCopy,
         ip: clientInfo.ip,
@@ -126,14 +134,14 @@ app.get('/copy/:text', (req, res) => {
         timestamp: new Date().toISOString()
     });
 
-    // Fire and forget the logging to Google Sheet
-    fetch(`${GOOGLE_SCRIPT_URL}?${params.toString()}`)
-        .then(response => {
-            if (!response.ok) {
-                response.text().then(text => console.error('Failed to log to Google Sheet:', text));
-            }
-        })
-        .catch(error => console.error('Failed to log to Google Sheet:', error));
+    try {
+        const response = await fetch(`${GOOGLE_SCRIPT_URL}?${params.toString()}`);
+        if (!response.ok) {
+            console.error('Failed to log to Google Sheet:', await response.text());
+        }
+    } catch (error) {
+        console.error('Failed to log to Google Sheet:', error);
+    }
 
     res.send(generateCopyHtml(textToCopy));
 });
