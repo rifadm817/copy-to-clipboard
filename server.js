@@ -56,19 +56,67 @@ function getClientInfo(req) {
 }
 
 function generateCopyHtml(textToCopy) {
+    // Escape backticks in textToCopy if necessary
+    const safeText = textToCopy.replace(/`/g, '\\`');
     return `
     <!DOCTYPE html>
     <html>
     <head>
+        <meta charset="utf-8">
         <title>Copy to Clipboard</title>
         <style>
-            body { margin: 0; padding: 20px; font-family: Arial; }
+            body {
+                margin: 0;
+                padding: 20px;
+                background-color: #f9f9f9;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                height: 100vh;
+            }
+            .container {
+                text-align: center;
+                background: #fff;
+                padding: 20px 30px;
+                border-radius: 12px;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            }
+            .copy-text {
+                font-size: 16px;
+                margin-bottom: 20px;
+                color: #333;
+            }
+            .copy-button {
+                background-color: #000;
+                color: #fff;
+                border: none;
+                border-radius: 17px;
+                padding: 12px 24px;
+                font-size: 16px;
+                cursor: pointer;
+                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+                transition: background-color 0.3s ease;
+            }
+            .copy-button:hover {
+                background-color: #333;
+            }
         </style>
     </head>
     <body>
         <script>
-            const decodedText = \`${textToCopy}\`;
-            
+            const decodedText = \`${safeText}\`;
+
+            function displayFallbackUI() {
+                const displayText = decodedText.length > 100 ? decodedText.substring(0, 100) + '...' : decodedText;
+                document.body.innerHTML = \`
+                    <div class="container">
+                        <p class="copy-text">Copy: \${displayText}</p>
+                        <button class="copy-button" onclick="manualCopy()">Copy</button>
+                    </div>
+                \`;
+            }
+
             window.onload = async function() {
                 try {
                     await navigator.clipboard.writeText(decodedText);
@@ -77,10 +125,10 @@ function generateCopyHtml(textToCopy) {
                     window.history.pushState(null, "", window.location.href);
                     window.close();
                 } catch (err) {
-                    document.body.innerHTML = '<button onclick="manualCopy()">Click to Copy</button>';
+                    displayFallbackUI();
                 }
             }
-            
+
             async function manualCopy() {
                 try {
                     await navigator.clipboard.writeText(decodedText);
@@ -97,6 +145,7 @@ function generateCopyHtml(textToCopy) {
     </html>
     `;
 }
+
 
 app.get('/copy/:text', (req, res) => {
     let textToCopy = decodeURIComponent(req.params.text);
