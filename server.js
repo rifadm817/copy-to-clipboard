@@ -63,6 +63,7 @@ function generateCopyHtml(textToCopy) {
     <html>
     <head>
         <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Copy to Clipboard</title>
         <style>
             body {
@@ -81,11 +82,14 @@ function generateCopyHtml(textToCopy) {
                 padding: 20px 30px;
                 border-radius: 12px;
                 box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+                max-width: 400px;
+                width: 100%;
             }
             .copy-text {
                 font-size: 16px;
                 margin-bottom: 20px;
                 color: #333;
+                word-wrap: break-word;
             }
             .copy-button {
                 background-color: #000;
@@ -97,9 +101,23 @@ function generateCopyHtml(textToCopy) {
                 cursor: pointer;
                 box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
                 transition: background-color 0.3s ease;
+                width: 100%;
             }
             .copy-button:hover {
                 background-color: #333;
+            }
+            @media (max-width: 480px) {
+                .container {
+                    padding: 20px;
+                    max-width: 90%;
+                }
+                .copy-text {
+                    font-size: 18px;
+                }
+                .copy-button {
+                    font-size: 18px;
+                    padding: 14px;
+                }
             }
         </style>
     </head>
