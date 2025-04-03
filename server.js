@@ -278,17 +278,26 @@ app.get('/:shortCode', async (req, res) => {
         const params = new URLSearchParams({
             action: 'retrieve',
             shortCode: shortCode,
+            // Include all analytics info in the retrieve request
             ip: clientInfo.ip,
             userAgent: req.get('User-Agent'),
             device: req.useragent.isMobile ? 'Mobile' : req.useragent.isTablet ? 'Tablet' : 'Desktop',
             referrer: clientInfo.referrer,
             country: clientInfo.geo.country || 'Unknown',
             city: clientInfo.geo.city || 'Unknown',
+            region: clientInfo.geo.region || 'Unknown',
+            timezone: clientInfo.geo.timezone || 'Unknown',
             browser: req.useragent.browser || 'Unknown',
+            browserVersion: req.useragent.version || 'Unknown',
             os: req.useragent.os || 'Unknown',
             platform: req.useragent.platform || 'Unknown',
+            isMobile: req.useragent.isMobile || false,
+            isTablet: req.useragent.isTablet || false,
+            isDesktop: req.useragent.isDesktop || false,
             language: req.get('Accept-Language') || 'Unknown',
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            // You could add this to differentiate in your logs
+            route: 'retrieve'
         });
 
         // Retrieve the long URL from n8n
@@ -311,38 +320,7 @@ app.get('/:shortCode', async (req, res) => {
             return res.status(404).json({ error: 'Short URL not found' });
         }
 
-        const shortUrl = `${req.protocol}://${req.get('host')}/${shortCode}`;
-        
-        const clickParams = new URLSearchParams({
-            action: 'shorten', // Use the same action as when creating
-            text: shortUrl,
-            ip: clientInfo.ip,
-            userAgent: req.get('User-Agent'),
-            device: req.useragent.isMobile ? 'Mobile' : req.useragent.isTablet ? 'Tablet' : 'Desktop',
-            referrer: clientInfo.referrer,
-            source: clientInfo.source,
-            country: clientInfo.geo.country || 'Unknown',
-            city: clientInfo.geo.city || 'Unknown',
-            region: clientInfo.geo.region || 'Unknown',
-            timezone: clientInfo.geo.timezone || 'Unknown',
-            browser: req.useragent.browser || 'Unknown',
-            browserVersion: req.useragent.version || 'Unknown',
-            os: req.useragent.os || 'Unknown',
-            platform: req.useragent.platform || 'Unknown',
-            isMobile: req.useragent.isMobile || false,
-            isTablet: req.useragent.isTablet || false,
-            isDesktop: req.useragent.isDesktop || false,
-            language: req.get('Accept-Language') || 'Unknown',
-            timestamp: new Date().toISOString(),
-            route: 'click',
-            shortCode: shortCode,
-            longUrl: data.longUrl
-        });
-
-        // Log the click (fire-and-forget)
-        fetch(`${N8N_WEBHOOK_URL}?${clickParams.toString()}`)
-            .catch(error => console.error('Failed to log click to n8n:', error));
-
+        // Redirect to the long URL (no need for additional tracking request)
         return res.redirect(301, data.longUrl);
     } catch (error) {
         console.error('Error retrieving shortened URL:', error);
