@@ -1,5 +1,5 @@
 const express = require('express');
-const nanoid = require('nanoid');
+const { nanoid } = require('nanoid');
 const cors = require('cors');
 const useragent = require('express-useragent');
 const geoip = require('geoip-lite');
@@ -12,9 +12,7 @@ app.use(cors());
 app.use(useragent.express());
 app.use(requestIp.mw());
 
-const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxPV7GBDxug4pbCHteBHepy3QuVc49tLNOPgqw0i6vtOE1BNklUCB2xMJ8zcGx8kvg9/exec';
-
-const urlDatabase = {};
+const N8N_WEBHOOK_URL = 'https://n8n-personal.up.railway.app/webhook-test/copy-to-clipboard';
 
 function generateShortCode() {
     return nanoid().substring(0, 7);
@@ -164,7 +162,6 @@ function generateCopyHtml(textToCopy) {
     `;
 }
 
-
 app.get('/copy/:text', (req, res) => {
     let textToCopy = decodeURIComponent(req.params.text);
     textToCopy = textToCopy.replace(/\\n/g, '\n');
@@ -172,6 +169,7 @@ app.get('/copy/:text', (req, res) => {
     const clientInfo = getClientInfo(req);
     
     const params = new URLSearchParams({
+        action: 'copy',
         text: textToCopy,
         ip: clientInfo.ip,
         userAgent: req.get('User-Agent'),
@@ -190,17 +188,18 @@ app.get('/copy/:text', (req, res) => {
         isTablet: req.useragent.isTablet || false,
         isDesktop: req.useragent.isDesktop || false,
         language: req.get('Accept-Language') || 'Unknown',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        route: 'copy'
     });
 
-    // Fire and forget the logging to Google Sheet
-    fetch(`${GOOGLE_SCRIPT_URL}?${params.toString()}`)
+    // Fire and forget the logging to n8n
+    fetch(`${N8N_WEBHOOK_URL}?${params.toString()}`)
         .then(response => {
             if (!response.ok) {
-                response.text().then(text => console.error('Failed to log to Google Sheet:', text));
+                response.text().then(text => console.error('Failed to log to n8n:', text));
             }
         })
-        .catch(error => console.error('Failed to log to Google Sheet:', error));
+        .catch(error => console.error('Failed to log to n8n:', error));
 
     res.send(generateCopyHtml(textToCopy));
 });
@@ -223,9 +222,45 @@ app.get('/shorten/*', (req, res) => {
         }
 
         const shortCode = generateShortCode();
-        urlDatabase[shortCode] = formattedUrl;
-
         const shortUrl = `${req.protocol}://${req.get('host')}/${shortCode}`;
+        
+        const clientInfo = getClientInfo(req);
+        
+        const params = new URLSearchParams({
+            action: 'shorten',
+            text: shortUrl, // Set as text for sheet compatibility
+            ip: clientInfo.ip,
+            userAgent: req.get('User-Agent'),
+            device: req.useragent.isMobile ? 'Mobile' : req.useragent.isTablet ? 'Tablet' : 'Desktop',
+            referrer: clientInfo.referrer,
+            source: clientInfo.source,
+            country: clientInfo.geo.country || 'Unknown',
+            city: clientInfo.geo.city || 'Unknown',
+            region: clientInfo.geo.region || 'Unknown',
+            timezone: clientInfo.geo.timezone || 'Unknown',
+            browser: req.useragent.browser || 'Unknown',
+            browserVersion: req.useragent.version || 'Unknown',
+            os: req.useragent.os || 'Unknown',
+            platform: req.useragent.platform || 'Unknown',
+            isMobile: req.useragent.isMobile || false,
+            isTablet: req.useragent.isTablet || false,
+            isDesktop: req.useragent.isDesktop || false,
+            language: req.get('Accept-Language') || 'Unknown',
+            timestamp: new Date().toISOString(),
+            route: 'shorten',
+            shortCode: shortCode,
+            longUrl: formattedUrl
+        });
+
+        // Fire and forget the logging to n8n
+        fetch(`${N8N_WEBHOOK_URL}?${params.toString()}`)
+            .then(response => {
+                if (!response.ok) {
+                    response.text().then(text => console.error('Failed to store shortened URL in sheet:', text));
+                }
+            })
+            .catch(error => console.error('Failed to log to n8n:', error));
+
         res.send(generateCopyHtml(shortUrl));
 
     } catch (error) {
@@ -234,15 +269,86 @@ app.get('/shorten/*', (req, res) => {
     }
 });
 
-app.get('/:shortCode', (req, res) => {
+app.get('/:shortCode', async (req, res) => {
     const { shortCode } = req.params;
-    const longUrl = urlDatabase[shortCode];
+    
+    try {
+        const clientInfo = getClientInfo(req);
+        const params = new URLSearchParams({
+            action: 'retrieve',
+            shortCode: shortCode,
+            // Include more client info for analytics in the retrieve request
+            ip: clientInfo.ip,
+            userAgent: req.get('User-Agent'),
+            device: req.useragent.isMobile ? 'Mobile' : req.useragent.isTablet ? 'Tablet' : 'Desktop',
+            referrer: clientInfo.referrer,
+            country: clientInfo.geo.country || 'Unknown',
+            city: clientInfo.geo.city || 'Unknown',
+            browser: req.useragent.browser || 'Unknown',
+            os: req.useragent.os || 'Unknown',
+            platform: req.useragent.platform || 'Unknown',
+            language: req.get('Accept-Language') || 'Unknown',
+            timestamp: new Date().toISOString()
+        });
 
-    if (!longUrl) {
-        return res.status(404).json({ error: 'Short URL not found' });
+        // Retrieve the long URL from n8n
+        const response = await fetch(`${N8N_WEBHOOK_URL}?${params.toString()}`);
+        
+        if (!response.ok) {
+            console.error('Failed to retrieve URL from sheet');
+            return res.status(404).json({ error: 'Short URL not found' });
+        }
+        
+        let data;
+        try {
+            data = await response.json();
+        } catch (e) {
+            console.error('Error parsing n8n response:', e);
+            return res.status(404).json({ error: 'Short URL not found' });
+        }
+        
+        if (!data || !data.longUrl) {
+            return res.status(404).json({ error: 'Short URL not found' });
+        }
+
+        // Log the click with the same action type as it was created with (shorten)
+        const shortUrl = `${req.protocol}://${req.get('host')}/${shortCode}`;
+        
+        const clickParams = new URLSearchParams({
+            action: 'shorten', // Use the same action as when creating
+            text: shortUrl,
+            ip: clientInfo.ip,
+            userAgent: req.get('User-Agent'),
+            device: req.useragent.isMobile ? 'Mobile' : req.useragent.isTablet ? 'Tablet' : 'Desktop',
+            referrer: clientInfo.referrer,
+            source: clientInfo.source,
+            country: clientInfo.geo.country || 'Unknown',
+            city: clientInfo.geo.city || 'Unknown',
+            region: clientInfo.geo.region || 'Unknown',
+            timezone: clientInfo.geo.timezone || 'Unknown',
+            browser: req.useragent.browser || 'Unknown',
+            browserVersion: req.useragent.version || 'Unknown',
+            os: req.useragent.os || 'Unknown',
+            platform: req.useragent.platform || 'Unknown',
+            isMobile: req.useragent.isMobile || false,
+            isTablet: req.useragent.isTablet || false,
+            isDesktop: req.useragent.isDesktop || false,
+            language: req.get('Accept-Language') || 'Unknown',
+            timestamp: new Date().toISOString(),
+            route: 'click',
+            shortCode: shortCode,
+            longUrl: data.longUrl
+        });
+
+        // Fire and forget the logging of click to n8n
+        fetch(`${N8N_WEBHOOK_URL}?${clickParams.toString()}`)
+            .catch(error => console.error('Failed to log click to n8n:', error));
+
+        return res.redirect(301, data.longUrl);
+    } catch (error) {
+        console.error('Error retrieving shortened URL:', error);
+        return res.status(500).json({ error: 'Internal server error' });
     }
-
-    return res.redirect(301, longUrl);
 });
 
 app.listen(PORT, () => {
