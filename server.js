@@ -1,9 +1,10 @@
-const express = require('express');
-const { nanoid } = require('nanoid');
-const cors = require('cors');
-const useragent = require('express-useragent');
-const geoip = require('geoip-lite');
-const requestIp = require('request-ip');
+import express from 'express';
+import { nanoid } from 'nanoid';
+import cors from 'cors';
+import useragent from 'express-useragent';
+import geoip from 'geoip-lite';
+import requestIp from 'request-ip';
+import fetch from 'node-fetch';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -277,7 +278,6 @@ app.get('/:shortCode', async (req, res) => {
         const params = new URLSearchParams({
             action: 'retrieve',
             shortCode: shortCode,
-            // Include more client info for analytics in the retrieve request
             ip: clientInfo.ip,
             userAgent: req.get('User-Agent'),
             device: req.useragent.isMobile ? 'Mobile' : req.useragent.isTablet ? 'Tablet' : 'Desktop',
@@ -311,7 +311,6 @@ app.get('/:shortCode', async (req, res) => {
             return res.status(404).json({ error: 'Short URL not found' });
         }
 
-        // Log the click with the same action type as it was created with (shorten)
         const shortUrl = `${req.protocol}://${req.get('host')}/${shortCode}`;
         
         const clickParams = new URLSearchParams({
@@ -340,7 +339,7 @@ app.get('/:shortCode', async (req, res) => {
             longUrl: data.longUrl
         });
 
-        // Fire and forget the logging of click to n8n
+        // Log the click (fire-and-forget)
         fetch(`${N8N_WEBHOOK_URL}?${clickParams.toString()}`)
             .catch(error => console.error('Failed to log click to n8n:', error));
 
