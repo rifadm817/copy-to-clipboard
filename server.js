@@ -12,7 +12,7 @@ app.use(cors());
 app.use(useragent.express());
 app.use(requestIp.mw());
 
-const N8N_WEBHOOK_URL = 'https://n8n-personal.up.railway.app/webhook-test/copy-to-clipboard';
+const N8N_WEBHOOK_URL = 'https://n8n-personal.up.railway.app/webhook/copy-to-clipboard';
 
 function generateShortCode() {
     return nanoid().substring(0, 7);
