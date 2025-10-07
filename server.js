@@ -196,14 +196,14 @@ function generateCopyHtml(textToCopy) {
                     await navigator.clipboard.writeText(decodedText);
                     showSuccess();
                     
-                    // Wait 800ms to show success message, then close
+                    // Wait 500ms to show success message, then close
                     setTimeout(() => {
                         window.close();
                         // If close doesn't work, try alternative
                         setTimeout(() => {
                             window.location.href = "about:blank";
                         }, 200);
-                    }, 800);
+                    }, 500);
                 } catch (err) {
                     console.error('Auto-copy failed:', err);
                     displayFallbackUI();
@@ -219,7 +219,7 @@ function generateCopyHtml(textToCopy) {
                         setTimeout(() => {
                             window.location.href = "about:blank";
                         }, 200);
-                    }, 800);
+                    }, 500);
                 } catch (err) {
                     alert('Failed to copy: ' + err.message + '\\n\\nPlease copy manually.');
                 }
@@ -342,6 +342,13 @@ app.get('/shorten/*', (req, res) => {
 app.get('/:shortCode', async (req, res) => {
     const { shortCode } = req.params;
     
+    // ✅ FIX: Add cache control headers to prevent redirect caching
+    res.set({
+        'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+    });
+    
     try {
         const clientInfo = getClientInfo(req);
         const params = new URLSearchParams({
@@ -399,8 +406,8 @@ app.get('/:shortCode', async (req, res) => {
             return res.status(404).json({ error: 'Short URL not found' });
         }
 
-        // Redirect to the long URL
-        return res.redirect(301, data.longUrl);
+        // ✅ FIX: Use 302 (temporary) instead of 301 (permanent) to prevent browser caching
+        return res.redirect(302, data.longUrl);
     } catch (error) {
         console.error('Error retrieving shortened URL:', error);
         return res.status(500).json({ error: 'Internal server error' });
