@@ -15,6 +15,92 @@ app.use(requestIp.mw());
 
 const N8N_WEBHOOK_URL = 'https://n8n-personal.up.railway.app/webhook/copy-to-clipboard';
 
+// Blocked IPs
+const BLOCKED_IPS = [
+    '181.196.139.129',
+    '91.82.97.204',
+    '125.198.225.192',
+    '190.57.138.250',
+    '149.50.199.242',
+    '96.53.71.194',
+    '153.190.135.8',
+    '177.37.175.73',
+    '173.94.205.211',
+    '177.121.110.58',
+];
+
+// IP Block Middleware
+app.use((req, res, next) => {
+    const ip = (req.clientIp || req.ip || '').replace('::ffff:', '');
+    if (BLOCKED_IPS.includes(ip)) {
+        console.log(`[BLOCKED] IP: ${ip} | Path: ${req.path} | Time: ${new Date().toISOString()} | UA: ${req.get('User-Agent')}`);
+        return res.status(403).send(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Access Denied</title>
+                <style>
+                    body {
+                        margin: 0;
+                        padding: 20px;
+                        background-color: #f9f9f9;
+                        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        height: 100vh;
+                    }
+                    .container {
+                        text-align: center;
+                        background: #fff;
+                        padding: 30px 40px;
+                        border-radius: 12px;
+                        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+                        max-width: 450px;
+                        width: 100%;
+                    }
+                    .icon {
+                        font-size: 48px;
+                        margin-bottom: 10px;
+                    }
+                    h1 {
+                        font-size: 22px;
+                        color: #d32f2f;
+                        margin-bottom: 10px;
+                    }
+                    p {
+                        font-size: 16px;
+                        color: #555;
+                        line-height: 1.5;
+                    }
+                    a {
+                        color: #1a73e8;
+                        text-decoration: none;
+                        font-weight: 600;
+                    }
+                    a:hover {
+                        text-decoration: underline;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="icon">🚫</div>
+                    <h1>Access Denied</h1>
+                    <p>Your IP address has been blocked due to suspicious activity.</p>
+                    <p>If you believe this is a mistake, please contact<br>
+                        <a href="https://www.appsheetdeveloper.com" target="_blank">www.appsheetdeveloper.com</a>
+                    </p>
+                </div>
+            </body>
+            </html>
+        `);
+    }
+    next();
+});
+
 // Fire and forget helper to prevent request cancellation
 function fireAndForget(url) {
     setImmediate(() => {
