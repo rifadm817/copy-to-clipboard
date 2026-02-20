@@ -13,6 +13,9 @@ app.use(cors());
 app.use(useragent.express());
 app.use(requestIp.mw());
 
+// ✅ Trust proxy — critical if behind Railway, Render, Cloudflare, etc.
+app.set('trust proxy', true);
+
 const N8N_WEBHOOK_URL = 'https://n8n-personal.up.railway.app/webhook/copy-to-clipboard';
 
 // Blocked IPs
@@ -53,12 +56,53 @@ const BLOCKED_IPS = [
     '122.100.229.208',
 ];
 
+// Helper to clean IP from various formats
+function cleanIp(raw) {
+    if (!raw) return '';
+    let ip = raw.trim();
+    // Strip IPv6-mapped-IPv4 prefixes
+    ip = ip.replace(/^::ffff:/i, '');
+    // If comma-separated (X-Forwarded-For), take the first one
+    if (ip.includes(',')) {
+        ip = ip.split(',')[0].trim();
+    }
+    return ip;
+}
+
+// 🔍 AUDIT: Log every incoming request before anything else
+app.use((req, res, next) => {
+    const rawClientIp = req.clientIp;
+    const rawExpressIp = req.ip;
+    const xForwardedFor = req.headers['x-forwarded-for'] || 'none';
+    const xRealIp = req.headers['x-real-ip'] || 'none';
+    const cleanedIp = cleanIp(rawClientIp || rawExpressIp);
+
+    console.log(`[AUDIT:REQUEST] ` +
+        `Path: ${req.path} | ` +
+        `Method: ${req.method} | ` +
+        `Raw clientIp: ${rawClientIp} | ` +
+        `Raw express ip: ${rawExpressIp} | ` +
+        `X-Forwarded-For: ${xForwardedFor} | ` +
+        `X-Real-IP: ${xRealIp} | ` +
+        `Cleaned IP: ${cleanedIp} | ` +
+        `Time: ${new Date().toISOString()} | ` +
+        `UA: ${req.get('User-Agent')}`
+    );
+
+    // Attach cleaned IP for downstream use
+    req.cleanedIp = cleanedIp;
+    next();
+});
 
 // IP Block Middleware
 app.use((req, res, next) => {
-    const ip = (req.clientIp || req.ip || '').replace('::ffff:', '');
-    if (BLOCKED_IPS.includes(ip)) {
-        console.log(`[BLOCKED] IP: ${ip} | Path: ${req.path} | Time: ${new Date().toISOString()} | UA: ${req.get('User-Agent')}`);
+    const ip = req.cleanedIp;
+    const isBlocked = BLOCKED_IPS.includes(ip);
+
+    console.log(`[AUDIT:BLOCK-CHECK] IP: ${ip} | Blocked: ${isBlocked} | Path: ${req.path}`);
+
+    if (isBlocked) {
+        console.log(`[BLOCKED] ✋ IP: ${ip} | Path: ${req.path} | Time: ${new Date().toISOString()} | UA: ${req.get('User-Agent')}`);
         return res.status(403).send(`
             <!DOCTYPE html>
             <html>
@@ -123,21 +167,25 @@ app.use((req, res, next) => {
             </html>
         `);
     }
+
+    console.log(`[ALLOWED] ✅ IP: ${ip} | Path: ${req.path}`);
     next();
 });
 
 // Fire and forget helper to prevent request cancellation
 function fireAndForget(url) {
+    console.log(`[AUDIT:N8N-SEND] Sending to n8n: ${url.substring(0, 120)}...`);
     setImmediate(() => {
         fetch(url)
             .then(response => {
+                console.log(`[AUDIT:N8N-RESPONSE] Status: ${response.status} | OK: ${response.ok}`);
                 if (!response.ok) {
                     response.text().then(text => 
-                        console.error('Failed to log to n8n:', text)
+                        console.error('[AUDIT:N8N-ERROR] Failed to log to n8n:', text)
                     ).catch(() => {});
                 }
             })
-            .catch(error => console.error('Failed to log to n8n:', error));
+            .catch(error => console.error('[AUDIT:N8N-ERROR] Failed to log to n8n:', error));
     });
 }
 
@@ -154,7 +202,7 @@ function formatUrl(url) {
 }
 
 function getClientInfo(req) {
-    const ip = req.clientIp || req.ip.replace('::ffff:', '');
+    const ip = req.cleanedIp || cleanIp(req.clientIp || req.ip);
     const geo = geoip.lookup(ip) || {
         country: 'Unknown',
         city: 'Unknown',
@@ -342,6 +390,8 @@ function generateCopyHtml(textToCopy) {
 }
 
 app.get('/copy/:text', (req, res) => {
+    console.log(`[AUDIT:ROUTE] /copy hit | IP: ${req.cleanedIp}`);
+
     // Add cache control headers
     res.set({
         'Cache-Control': 'no-store, no-cache, must-revalidate, private',
@@ -385,6 +435,8 @@ app.get('/copy/:text', (req, res) => {
 });
 
 app.get('/shorten/*', (req, res) => {
+    console.log(`[AUDIT:ROUTE] /shorten hit | IP: ${req.cleanedIp}`);
+
     try {
         // Add cache control headers to prevent caching
         res.set({
@@ -445,7 +497,7 @@ app.get('/shorten/*', (req, res) => {
         res.send(generateCopyHtml(shortUrl));
 
     } catch (error) {
-        console.error('Error:', error);
+        console.error('[AUDIT:ERROR] /shorten error:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -453,6 +505,8 @@ app.get('/shorten/*', (req, res) => {
 app.get('/:shortCode', async (req, res) => {
     const { shortCode } = req.params;
     
+    console.log(`[AUDIT:ROUTE] /:shortCode hit | Code: ${shortCode} | IP: ${req.cleanedIp}`);
+
     // ✅ FIX: Add cache control headers to prevent redirect caching
     res.set({
         'Cache-Control': 'no-store, no-cache, must-revalidate, private',
@@ -485,11 +539,13 @@ app.get('/:shortCode', async (req, res) => {
             route: 'retrieve'
         });
 
+        console.log(`[AUDIT:N8N-RETRIEVE] Fetching longUrl from n8n for shortCode: ${shortCode}`);
+
         // Retrieve the long URL from n8n
         const response = await fetch(`${N8N_WEBHOOK_URL}?${params.toString()}`);
         
         if (!response.ok) {
-            console.error(`Failed to retrieve URL from sheet. Status: ${response.status}`);
+            console.error(`[AUDIT:N8N-RETRIEVE-FAIL] Status: ${response.status} for shortCode: ${shortCode}`);
             return res.status(404).json({ error: 'Short URL not found' });
         }
         
@@ -498,7 +554,7 @@ app.get('/:shortCode', async (req, res) => {
         
         // Check if response is empty
         if (!responseText || responseText.trim() === '') {
-            console.error('N8N returned empty response');
+            console.error('[AUDIT:N8N-RETRIEVE-FAIL] Empty response for shortCode:', shortCode);
             return res.status(404).json({ error: 'Short URL not found' });
         }
         
@@ -507,24 +563,28 @@ app.get('/:shortCode', async (req, res) => {
         try {
             data = JSON.parse(responseText);
         } catch (e) {
-            console.error('Error parsing n8n response:', e);
+            console.error('[AUDIT:N8N-RETRIEVE-FAIL] JSON parse error:', e);
             console.error('Response was:', responseText);
             return res.status(404).json({ error: 'Short URL not found' });
         }
         
         if (!data || !data.longUrl) {
-            console.error('No longUrl in response:', data);
+            console.error('[AUDIT:N8N-RETRIEVE-FAIL] No longUrl in response:', data);
             return res.status(404).json({ error: 'Short URL not found' });
         }
+
+        console.log(`[AUDIT:REDIRECT] shortCode: ${shortCode} → ${data.longUrl} | IP: ${req.cleanedIp}`);
 
         // ✅ FIX: Use 302 (temporary) instead of 301 (permanent) to prevent browser caching
         return res.redirect(302, data.longUrl);
     } catch (error) {
-        console.error('Error retrieving shortened URL:', error);
+        console.error('[AUDIT:ERROR] /:shortCode error:', error);
         return res.status(500).json({ error: 'Internal server error' });
     }
 });
 
 app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`[AUDIT:STARTUP] Server running on http://localhost:${PORT}`);
+    console.log(`[AUDIT:STARTUP] Blocked IPs count: ${BLOCKED_IPS.length}`);
+    console.log(`[AUDIT:STARTUP] Trust proxy: enabled`);
 });
